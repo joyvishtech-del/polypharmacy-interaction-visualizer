@@ -1,0 +1,100 @@
+# Production compose file for app.medinteract.sbs
+#
+# Self-contained: do NOT chain with docker-compose.yml. Usage:
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Key differences from docker-compose.yml (local dev):
+#   - No host port bindings on any service. The frontend is reachable only
+#     via the n8n_default Traefik instance, which terminates TLS for the
+#     subdomain app.medinteract.sbs.
+#   - Frontend joins both the internal `polypharmacy-net` (to reach backend)
+#     and the external `n8n_default` (so Traefik can reach it).
+#   - Backend, postgres, minio stay on the internal network only.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: polypharmacy-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - polypharmacy-net
+
+  minio:
+    image: minio/minio:latest
+    container_name: polypharmacy-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY}
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - polypharmacy-net
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: polypharmacy-backend:prod
+    container_name: polypharmacy-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://minio:9000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - polypharmacy-net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: polypharmacy-frontend:prod
+    container_name: polypharmacy-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    networks:
+      - polypharmacy-net
+      - n8n_default
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=n8n_default"
+      - "traefik.http.routers.polypharmacy.rule=Host(`app.medinteract.sbs`)"
+      - "traefik.http.routers.polypharmacy.entrypoints=websecure"
+      - "traefik.http.routers.polypharmacy.tls=true"
+      - "traefik.http.routers.polypharmacy.tls.certresolver=mytlschallenge"
+      - "traefik.http.services.polypharmacy.loadbalancer.server.port=80"
+
+volumes:
+  postgres_data:
+  minio_data:
+
+networks:
+  polypharmacy-net:
+    driver: bridge
+  n8n_default:
+    external: true

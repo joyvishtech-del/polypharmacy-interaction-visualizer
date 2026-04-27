@@ -1,0 +1,82 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: polypharmacy-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-polypharmacy}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpassword}
+      POSTGRES_DB: ${POSTGRES_DB:-polypharmacy}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-polypharmacy} -d ${POSTGRES_DB:-polypharmacy}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - polypharmacy-net
+
+  minio:
+    image: minio/minio:latest
+    container_name: polypharmacy-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:-minioadmin}
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - polypharmacy-net
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: polypharmacy-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-polypharmacy}:${POSTGRES_PASSWORD:-devpassword}@postgres:5432/${POSTGRES_DB:-polypharmacy}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://minio:9000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - polypharmacy-net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    # Pinning the image name keeps the dev override (which sets
+    # ``image: node:20-alpine``) from re-tagging the production build
+    # over the public node base image.
+    image: claudeproject-frontend:prod
+    container_name: polypharmacy-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - polypharmacy-net
+
+volumes:
+  postgres_data:
+  minio_data:
+
+networks:
+  polypharmacy-net:
+    driver: bridge

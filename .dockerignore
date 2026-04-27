@@ -1,0 +1,39 @@
+# VCS
+.git
+.gitignore
+.github
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+.venv
+venv
+.pytest_cache
+.mypy_cache
+.ruff_cache
+htmlcov
+.coverage
+
+# Node / build artifacts
+node_modules
+dist
+.vite
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Editor / OS
+.idea
+.vscode
+.DS_Store
+Thumbs.db
+
+# Project
+coverage
+uploads
+*.log
+README.md
+docs
