@@ -1,4 +1,4 @@
-# Polypharmacy Interaction Visualizer
+# MedInteract — an AI drug interaction visualizer for patients
 
 > An AI-powered web app that helps patients understand drug-drug interactions across all the medications they take — with a colour-coded interaction graph, plain-language top-3 risks, and questions to bring to their doctor.
 
